@@ -19,7 +19,7 @@
         script limpa o que sobra depois, nao substitui a desinstalacao.
       - Feche Riot Client, VALORANT e Vanguard antes. O driver vgk as vezes so libera o arquivo
         .sys depois de um reboot — se a remocao dele falhar, reinicie e rode o script de novo.
-      - Por padrao roda em modo simulacao (-WhatIf). Pra executar de verdade:
+      - Use -WhatIf para simular sem alterar nada. Para executar de verdade:
             .\clean-riot-full.ps1 -Confirm:$false
       - Se o Windows bloquear por ser "arquivo baixado da internet", rode antes:
             Unblock-File -Path .\clean-riot-full.ps1
@@ -34,8 +34,10 @@ function Remove-RegKeySafe {
     param([string]$Path)
     if (Test-Path $Path) {
         if ($PSCmdlet.ShouldProcess($Path, "Remover chave de registro")) {
-            Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "[OK] Registro removido: $Path" -ForegroundColor Green
+            try {
+                Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop
+                Write-Host "[OK] Registro removido: $Path" -ForegroundColor Green
+            } catch { Write-Host "[ERRO] Falha no registro $Path : $($_.Exception.Message)" -ForegroundColor Red }
         }
     }
     else {
@@ -52,7 +54,8 @@ function Remove-ServiceSafe {
                 if ($svc.Status -ne 'Stopped') {
                     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
                 }
-                & sc.exe delete $ServiceName | Out-Null
+                $result = & sc.exe delete $ServiceName 2>&1
+                if ($LASTEXITCODE -ne 0) { throw ($result -join ' ') }
                 Write-Host "[OK] Servico removido: $ServiceName" -ForegroundColor Green
             }
             catch {
@@ -86,7 +89,7 @@ function Remove-PathSafe {
     param([string]$Path)
     if (Test-Path $Path) {
         if ($PSCmdlet.ShouldProcess($Path, "Remover arquivo/pasta")) {
-            Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
             if (Test-Path $Path) {
                 Write-Host "[AVISO] Nao foi possivel remover totalmente (arquivo em uso?): $Path" -ForegroundColor Yellow
             }
@@ -108,8 +111,10 @@ function Remove-ScheduledTaskSafe {
     foreach ($task in $tasks) {
         $full = Join-Path $task.TaskPath $task.TaskName
         if ($PSCmdlet.ShouldProcess($full, "Remover tarefa agendada")) {
-            Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -Confirm:$false -ErrorAction SilentlyContinue
-            Write-Host "[OK] Tarefa agendada removida: $full" -ForegroundColor Green
+            try {
+                Unregister-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath -Confirm:$false -ErrorAction Stop
+                Write-Host "[OK] Tarefa agendada removida: $full" -ForegroundColor Green
+            } catch { Write-Host "[ERRO] Falha na tarefa $full : $($_.Exception.Message)" -ForegroundColor Red }
         }
     }
     if (-not $tasks) {
@@ -168,9 +173,13 @@ Write-Host "`n--- Pastas em disco ---" -ForegroundColor Cyan
 $diskPaths = @(
     "C:\Riot Games",
     "C:\ProgramData\Riot Games",
+    "C:\Program Files\Riot Games",
     "C:\Program Files\Riot Vanguard",
+    "C:\Program Files (x86)\Riot Games",
+    "C:\Program Files (x86)\Riot Vanguard",
     "$env:LOCALAPPDATA\Riot Games",
-    "$env:APPDATA\Riot Games"
+    "$env:APPDATA\Riot Games",
+    "$env:LOCALAPPDATA\Riot Client"
 )
 foreach ($path in $diskPaths) { Remove-PathSafe -Path $path }
 
